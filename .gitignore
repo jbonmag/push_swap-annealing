@@ -1,0 +1,9 @@
+*.o
+*.a
+push_swap
+checker
+*.zip
+.DS_Store
+.claude/
+checker_linux
+__pycache__/
