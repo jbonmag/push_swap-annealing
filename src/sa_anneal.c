@@ -31,6 +31,8 @@ static void	one_move(t_sa *x)
 /*
 ** Runs one cooling from t0 to t1 on x->g for a given amount of simulated
 ** steps. Work replaces a clock, so the answer does not depend on the machine.
+** Trials that simulate nothing are frequent when n is tiny, so the number of
+** trials is capped by the same amount.
 ** The best solution found ends in x->best and x->bestc.
 */
 void	sa_anneal(t_sa *x, long work, double t0, double t1)
@@ -45,7 +47,7 @@ void	sa_anneal(t_sa *x, long work, double t0, double t1)
 	x->bestc = x->cur;
 	x->temp = t0;
 	iters = 0;
-	while (x->work - start < work)
+	while (x->work - start < work && iters < work)
 	{
 		if ((iters & 1023) == 0)
 		{
