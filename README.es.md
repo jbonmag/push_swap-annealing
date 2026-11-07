@@ -18,14 +18,15 @@ Medias sobre las mismas 20 entradas aleatorias con semilla en cada tamaño; cada
 1. [El ejercicio](#el-ejercicio)
 2. [El reto que nos pusimos](#el-reto-que-nos-pusimos)
 3. [Cómo funciona](#cómo-funciona)
-4. [Rapidez frente a longitud](#rapidez-frente-a-longitud)
-5. [Cómo llegamos aquí](#cómo-llegamos-aquí)
-6. [Lo que no funcionó](#lo-que-no-funcionó)
-7. [¿A qué distancia del óptimo?](#a-qué-distancia-del-óptimo)
-8. [Reglas y cumplimiento](#reglas-y-cumplimiento)
-9. [Compilar, ejecutar y probar](#compilar-ejecutar-y-probar)
-10. [Estructura del repositorio](#estructura-del-repositorio)
-11. [Licencia](#licencia)
+4. [El recocido simulado a fondo](#el-recocido-simulado-a-fondo)
+5. [Rapidez frente a longitud](#rapidez-frente-a-longitud)
+6. [Cómo llegamos aquí](#cómo-llegamos-aquí)
+7. [Lo que no funcionó](#lo-que-no-funcionó)
+8. [¿A qué distancia del óptimo?](#a-qué-distancia-del-óptimo)
+9. [Reglas y cumplimiento](#reglas-y-cumplimiento)
+10. [Compilar, ejecutar y probar](#compilar-ejecutar-y-probar)
+11. [Estructura del repositorio](#estructura-del-repositorio)
+12. [Licencia](#licencia)
 
 ---
 
@@ -74,7 +75,7 @@ Con estas cuatro, las operaciones salen solas. Cada movimiento lleva un elemento
 
 **De dónde viene el nombre.** El *recocido* (en inglés, *annealing*) es un tratamiento térmico de metales y vidrio: se calienta el material y se enfría muy despacio. Así los átomos tienen tiempo de colocarse en una estructura ordenada y de baja energía. Si se enfría de golpe, quedan atrapados en una estructura desordenada y frágil. El *recocido simulado* es un método de optimización de 1983 que imita ese proceso, y es el nombre habitual en español de *simulated annealing*.
 
-**Cómo se aplica aquí.** El programa hace una y otra vez un pequeño cambio al azar, y lo conserva si acorta la solución. A veces conserva también un cambio que la alarga. La probabilidad de aceptar un empeoramiento es la "temperatura": al principio es alta y la búsqueda explora con libertad; luego baja poco a poco, y al final solo se aceptan mejoras. Eso permite salir de mínimos locales en vez de quedarse en el primero que se encuentra. En el código, `SA_T0` y `SA_T1` son las temperaturas inicial y final, y "recalentar" significa volver a subirla.
+**Cómo se aplica aquí.** El programa hace una y otra vez un pequeño cambio al azar, y lo conserva si acorta la solución. A veces conserva también un cambio que la alarga. Lo dispuesto que está a aceptar un empeoramiento lo fija la "temperatura": al principio es alta y la búsqueda explora con libertad; luego baja poco a poco, y al final solo se aceptan mejoras. Eso permite salir de mínimos locales en vez de quedarse en el primero que se encuentra. En el código, `SA_T0` y `SA_T1` son las temperaturas inicial y final, y "recalentar" significa volver a subirla. La regla exacta, con su fórmula, está en [El recocido simulado a fondo](#el-recocido-simulado-a-fondo).
 
 Los movimientos incluyen:
 
@@ -110,6 +111,116 @@ Juntos llevaron la búsqueda de unas 600 a más de 800.000 evaluaciones por segu
 ### 6. Determinista a propósito
 
 La búsqueda se detiene tras una **cantidad fija de trabajo** (`SA_BUDGET` en `src/sa.h`), no tras un tiempo fijo. La misma entrada da siempre la misma salida, en cualquier máquina. Una máquina más rápida termina antes y una más lenta tarda más, pero imprime exactamente la misma respuesta.
+
+## El recocido simulado a fondo
+
+Esta sección es para quien quiera las matemáticas. Sigue el método de Kirkpatrick, Gelatt y Vecchi (*Science*, 1983), que se apoya en la regla de Metropolis de la física estadística (1953).
+
+### La energía
+
+El recocido minimiza una cantidad llamada **energía**. Aquí la energía de una solución $s$ es simplemente su longitud: el número de operaciones que imprime.
+
+```math
+E(s) = \text{número de operaciones de } s
+```
+
+Un **movimiento** convierte $s$ en una solución vecina $s'$, y su coste es el cambio de energía:
+
+```math
+\Delta = E(s') - E(s)
+```
+
+$\Delta < 0$ significa que el movimiento acorta la solución, $\Delta = 0$ que su longitud no cambia, y $\Delta > 0$ que la alarga. Las dos cosas se cuentan en operaciones, así que la temperatura de más abajo también se mide en operaciones.
+
+### La regla de aceptación (Metropolis)
+
+A temperatura $T$, un movimiento se acepta con probabilidad
+
+```math
+P(\text{aceptar}) =
+\begin{cases}
+1 & \text{si } \Delta \le 0 \\
+e^{-\Delta / T} & \text{si } \Delta > 0
+\end{cases}
+```
+
+Las mejoras se conservan siempre. Un movimiento que empeora se conserva a veces: los empeoramientos pequeños a menudo, los grandes rara vez, y cada vez menos a medida que baja $T$. Eso es lo que distingue al recocido de un simple descenso, que se quedaría congelado en el primer mínimo local que encontrase.
+
+Los valores que usa de verdad este programa dan una idea de la escala:
+
+| El movimiento alarga la solución en | con $T = 1{,}2$ (inicio) | con $T = 0{,}6$ (ganador recalentado) | con $T = 0{,}15$ (final) |
+|---|---|---|---|
+| 1 operación | 43% | 19% | 0,13% |
+| 2 operaciones | 19% | 3,6% | 0,0002% |
+| 3 operaciones | 8,2% | 0,67% | ≈ 0 |
+| 5 operaciones | 1,6% | 0,02% | ≈ 0 |
+
+Al principio, la búsqueda acepta sin problema perder una o dos operaciones para salir de una mala forma. Al final, es prácticamente un descenso puro.
+
+### Por qué funciona: la distribución de Boltzmann
+
+Si la temperatura se mantuviera fija y la búsqueda durase lo suficiente, visitaría cada solución $s$ con una probabilidad proporcional a
+
+```math
+\pi_T(s) \propto e^{-E(s)/T}
+```
+
+Es la distribución de Boltzmann de la física estadística. Con $T$ alta es casi plana, así que la búsqueda vaga por todas partes. Cuando $T \to 0$, todo su peso se concentra en las soluciones de menor energía, que son las más cortas. Enfriar despacio permite que la búsqueda siga a esa distribución mientras se estrecha, en vez de caer en el mínimo local más cercano.
+
+Existe una garantía teórica (Hajek, 1988): con un enfriamiento logarítmico $T_k = c / \ln k$, con $c$ suficientemente grande, la búsqueda alcanza un mínimo global con probabilidad que tiende a 1. Ese enfriamiento es demasiado lento para ser práctico, así que los programas reales, este incluido, enfrían más rápido y renuncian a la garantía.
+
+### El calendario de enfriamiento
+
+Este programa enfría de forma **geométrica**: la temperatura baja en el mismo factor por cada parte igual del trabajo.
+
+```math
+T(f) = T_0 \left(\frac{T_1}{T_0}\right)^{f} = T_0^{\,1-f}\; T_1^{\,f}, \qquad 0 \le f \le 1
+```
+
+$f$ es la fracción del trabajo hecha hasta el momento. La temperatura se actualiza cada 1024 intentos. Hay dos enfriamientos, uno detrás de otro:
+
+| Etapa | Parte del trabajo | Desde | Hasta | Constantes en `src/sa.h` |
+|---|---|---|---|---|
+| Competición de las 160 formas iniciales (9 rondas de eliminación por mitades) | 30% | 1,2 | 0,15 | `SA_T0`, `SA_T1` |
+| Pulido de la ganadora | 70% | 0,6 | 0,15 | `SA_TR`, `SA_T1` |
+
+Durante la competición, la ronda $r$ de $R = 9$ recorre el tramo del calendario que va de $f = r/R$ a $f = (r+1)/R$. Así, la competición entera es un único enfriamiento, compartido por todas las formas que sobreviven. Después la ganadora se recalienta a 0,6, lo bastante caliente para reorganizarla sin destruirla, y se vuelve a enfriar con el 70% restante.
+
+### Cómo aplica la regla el código
+
+La prueba de Metropolis se puede reescribir para que el número aleatorio se saque **antes** de evaluar el movimiento. Con $u$ uniforme en $(0, 1)$:
+
+```math
+u < e^{-\Delta/T} \iff \Delta < T\,(-\ln u)
+```
+
+Así que cada intento saca primero un umbral $d = T\,(-\ln u)$, y después acepta el movimiento si $\Delta \le d$. Como $\Delta$ es un número entero, compararlo con $\lfloor d \rfloor$ da la misma respuesta. En `src/sa_anneal.c` y `src/sa_span.c` queda así, simplificado:
+
+```c
+d = (int)(temp * logu[rnd() % 4096]);  /* el umbral T * (-ln u) */
+/* ... evaluar el movimiento, que da delta ... */
+accepted = (delta <= d);
+```
+
+Sacar el umbral antes tiene dos ventajas:
+
+- **Ni logaritmos ni exponenciales en el bucle interno.** Los valores de $-\ln u$ se calculan una sola vez en una tabla de 4096 entradas (`logu`). El enunciado no permite la biblioteca matemática, así que `sa_ln` y `sa_exp` están escritas a mano, y solo se ejecutan al construir la tabla y al cambiar la temperatura.
+- **Abandono temprano.** Como el intento sabe cuál es el mayor $\Delta$ que podría aceptar, el evaluador puede dejar de simular en cuanto el movimiento está claramente perdido. Eso ocurre cuando el coste parcial supera $d$ más un pequeño margen (`SA_SLACK` = 8 operaciones), así que nunca hace falta calcular la longitud entera. La mayoría de los movimientos se rechazan, así que esto ahorra buena parte del trabajo.
+
+Los números aleatorios salen de un generador xorshift de 64 bits con semilla fija. Por eso la misma entrada da siempre la misma salida.
+
+### Los movimientos
+
+Cada intento elige al azar un tipo de movimiento. Estas son las proporciones de `src/sa_anneal.c`:
+
+| Movimiento | Parte de los intentos |
+|---|---|
+| Reordenar sigma o tau (la mitad cada uno): llevar un bloque de 1 a 3 elementos a otro sitio (88%) o invertir un tramo (12%) | 91% |
+| Reordenar pi, el orden circular en b | 4% |
+| Movimiento compuesto: un elemento se coloca junto al mismo vecino en pi y en un orden | 4% |
+| Meter o sacar un elemento de keep | 1% |
+
+Los movimientos que solo cambian el orden de la fase de push o de pull son baratos de evaluar, porque solo se vuelve a simular el tramo afectado de la solución. Por eso son casi todos los intentos.
 
 ## Rapidez frente a longitud
 

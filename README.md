@@ -18,14 +18,15 @@ Averages over the same 20 seeded random inputs per size, with every output check
 1. [The exercise](#the-exercise)
 2. [The challenge we set ourselves](#the-challenge-we-set-ourselves)
 3. [How it works](#how-it-works)
-4. [Speed versus length](#speed-versus-length)
-5. [How we got here](#how-we-got-here)
-6. [What did not work](#what-did-not-work)
-7. [How far from optimal?](#how-far-from-optimal)
-8. [Rules and compliance](#rules-and-compliance)
-9. [Build, run and test](#build-run-and-test)
-10. [Repository layout](#repository-layout)
-11. [License](#license)
+4. [Simulated annealing in depth](#simulated-annealing-in-depth)
+5. [Speed versus length](#speed-versus-length)
+6. [How we got here](#how-we-got-here)
+7. [What did not work](#what-did-not-work)
+8. [How far from optimal?](#how-far-from-optimal)
+9. [Rules and compliance](#rules-and-compliance)
+10. [Build, run and test](#build-run-and-test)
+11. [Repository layout](#repository-layout)
+12. [License](#license)
 
 ---
 
@@ -74,7 +75,7 @@ Given these four, the operations follow mechanically. Each move takes one elemen
 
 **Where the name comes from.** *Annealing* is a heat treatment for metal and glass: the material is heated and then cooled very slowly, so its atoms have time to settle into an ordered, low-energy structure. Cooled quickly, they get trapped in a disordered, brittle one. *Simulated annealing* is an optimisation method from 1983 that imitates this process.
 
-**How it applies here.** The program repeatedly makes a small random change and keeps it if it shortens the solution. Sometimes it also keeps a change that makes the solution longer. The probability of accepting a worse solution is the "temperature". It starts high, so the search explores freely, and falls slowly until only improvements are accepted. That lets the search escape local minima instead of stopping at the first one it finds. In the code, `SA_T0` and `SA_T1` are the starting and final temperatures, and "reheating" means raising it again.
+**How it applies here.** The program repeatedly makes a small random change and keeps it if it shortens the solution. Sometimes it also keeps a change that makes the solution longer. How readily it accepts a worse solution is set by the "temperature". It starts high, so the search explores freely, and falls slowly until only improvements are accepted. That lets the search escape local minima instead of stopping at the first one it finds. In the code, `SA_T0` and `SA_T1` are the starting and final temperatures, and "reheating" means raising it again. The exact rule, with its formula, is in [Simulated annealing in depth](#simulated-annealing-in-depth).
 
 The moves include:
 
@@ -110,6 +111,116 @@ Together they took the search from about 600 to over 800,000 evaluations per sec
 ### 6. Deterministic by design
 
 The search stops after a **fixed amount of work** (`SA_BUDGET` in `src/sa.h`), not after a fixed time. The same input always gives the same output, on any machine. A faster machine finishes sooner; a slower one takes longer, but prints exactly the same answer.
+
+## Simulated annealing in depth
+
+This section is for readers who want the mathematics. It follows the method of Kirkpatrick, Gelatt and Vecchi (*Science*, 1983), which builds on the Metropolis rule from statistical physics (1953).
+
+### The energy
+
+Annealing minimises a quantity called the **energy**. Here the energy of a solution $s$ is simply its length: the number of operations it prints.
+
+```math
+E(s) = \text{number of operations of } s
+```
+
+A **move** turns $s$ into a neighbouring solution $s'$, and its cost is the change in energy:
+
+```math
+\Delta = E(s') - E(s)
+```
+
+$\Delta < 0$ means the move shortens the solution, $\Delta = 0$ leaves its length unchanged, and $\Delta > 0$ lengthens it. Both are counted in operations, so the temperature below is also measured in operations.
+
+### The acceptance rule (Metropolis)
+
+At temperature $T$, a move is accepted with probability
+
+```math
+P(\text{accept}) =
+\begin{cases}
+1 & \text{if } \Delta \le 0 \\
+e^{-\Delta / T} & \text{if } \Delta > 0
+\end{cases}
+```
+
+Improvements are always kept. A worsening move is kept sometimes: small worsenings often, large ones rarely, and less and less often as $T$ falls. This is what separates annealing from plain hill climbing, which would freeze in the first local minimum it reaches.
+
+The values this program actually uses give an idea of the scale:
+
+| Move makes the solution longer by | at $T = 1.2$ (start) | at $T = 0.6$ (reheated winner) | at $T = 0.15$ (end) |
+|---|---|---|---|
+| 1 operation | 43% | 19% | 0.13% |
+| 2 operations | 19% | 3.6% | 0.0002% |
+| 3 operations | 8.2% | 0.67% | ≈ 0 |
+| 5 operations | 1.6% | 0.02% | ≈ 0 |
+
+At the start, the search happily accepts a loss of one or two operations to escape a bad shape. At the end, it is practically a pure descent.
+
+### Why this works: the Boltzmann distribution
+
+If the temperature were held fixed and the search ran for long enough, it would visit each solution $s$ with probability proportional to
+
+```math
+\pi_T(s) \propto e^{-E(s)/T}
+```
+
+This is the Boltzmann distribution of statistical physics. At high $T$ it is nearly flat, so the search wanders widely. As $T \to 0$, all its weight concentrates on the solutions of lowest energy, which are the shortest ones. Cooling slowly lets the search follow that distribution as it narrows, instead of falling into whichever local minimum is nearest.
+
+There is a theoretical guarantee (Hajek, 1988): with a logarithmic schedule $T_k = c / \ln k$, where $c$ is large enough, the search reaches a global minimum with probability tending to 1. That schedule is far too slow to be practical, so real programs, this one included, cool faster and accept that the guarantee is lost.
+
+### The cooling schedule
+
+This program cools **geometrically**: the temperature falls by the same factor for each equal share of the work.
+
+```math
+T(f) = T_0 \left(\frac{T_1}{T_0}\right)^{f} = T_0^{\,1-f}\; T_1^{\,f}, \qquad 0 \le f \le 1
+```
+
+$f$ is the fraction of the work done so far. The temperature is updated every 1024 trials. Two coolings run one after the other:
+
+| Stage | Share of the work | From | To | Constants in `src/sa.h` |
+|---|---|---|---|---|
+| Race of the 160 starting shapes (9 rounds of successive halving) | 30% | 1.2 | 0.15 | `SA_T0`, `SA_T1` |
+| Polishing the winner | 70% | 0.6 | 0.15 | `SA_TR`, `SA_T1` |
+
+During the race, round $r$ of $R = 9$ covers the stretch of the schedule from $f = r/R$ to $f = (r+1)/R$. So the race as a whole is a single cooling, shared by every surviving shape. The winner is then reheated to 0.6, which is hot enough to reorganise it but not to destroy it, and cooled again with the remaining 70%.
+
+### How the code applies the rule
+
+The Metropolis test can be rewritten so that the random number is drawn **before** the move is evaluated. With $u$ uniform in $(0, 1)$:
+
+```math
+u < e^{-\Delta/T} \iff \Delta < T\,(-\ln u)
+```
+
+So each trial first draws a threshold $d = T\,(-\ln u)$, and then accepts the move if $\Delta \le d$. Since $\Delta$ is a whole number, comparing it with $\lfloor d \rfloor$ gives the same answer. In `src/sa_anneal.c` and `src/sa_span.c` this reads, in simplified form:
+
+```c
+d = (int)(temp * logu[rnd() % 4096]);  /* the threshold T * (-ln u) */
+/* ... evaluate the move, giving delta ... */
+accepted = (delta <= d);
+```
+
+Drawing the threshold first has two advantages:
+
+- **No logarithm or exponential in the inner loop.** The values of $-\ln u$ are precomputed once in a table of 4096 entries (`logu`). The subject allows no math library, so `sa_ln` and `sa_exp` are written by hand, and they only run when the table is built and when the temperature changes.
+- **Early abandon.** Because the trial knows the largest $\Delta$ it could accept, the evaluator can stop simulating as soon as the move is clearly lost. That is when the partial cost exceeds $d$ plus a small margin (`SA_SLACK` = 8 operations), so the full length never has to be computed. Most moves are rejected, so this saves a large share of the work.
+
+The random numbers come from a 64-bit xorshift generator with a fixed seed. That is why the same input always gives the same output.
+
+### The moves
+
+Each trial picks one kind of move at random. These are the proportions in `src/sa_anneal.c`:
+
+| Move | Share of trials |
+|---|---|
+| Reorder sigma or tau (half each): move a block of 1–3 elements elsewhere (88%) or reverse a stretch (12%) | 91% |
+| Reorder pi, the circular order in b | 4% |
+| Compound move: an element moves next to the same neighbour in pi and in one order | 4% |
+| Move an element into or out of keep | 1% |
+
+Moves that change only the order of the push or pull phase are cheap to evaluate, because only the affected stretch of the solution is re-simulated. That is why they make up almost all of the trials.
 
 ## Speed versus length
 
